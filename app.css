@@ -1,0 +1,103 @@
+/* Автограф-сессия с ИИ — интерфейс станции (дизайн-холст 1280×800). Всё движение — из app.js. */
+.ag{--bg:#0f2a20;--bg2:#173a2d;--paper:#f1ece2;--ink:#1b1a17;--text:#f1ece2;--muted:rgba(241,236,226,.62);--accent:#c9a466;--seal:#b23a22;
+  --serif:"Spectral",Georgia,serif;--sans:"Golos Text","Helvetica Neue",Arial,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace;
+  position:relative;width:1280px;height:800px;overflow:hidden;background:var(--bg);color:var(--text);font:400 18px/1.5 var(--sans);
+  user-select:none;-webkit-user-select:none;touch-action:none;-webkit-tap-highlight-color:transparent}
+.ag *{box-sizing:border-box;margin:0;padding:0}
+.ag em{font-family:var(--serif);font-style:italic;font-weight:300;color:var(--accent)}
+.ag .abs{position:absolute}
+.ag .lbl{font:500 13px/1.3 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+.ag .lbl.dim{color:var(--muted)}
+.ag-bg{position:absolute;inset:0}
+.ag-glow{position:absolute;width:900px;height:900px;border-radius:50%;left:0;top:0;pointer-events:none;
+  background:radial-gradient(circle,color-mix(in srgb,var(--accent) 22%,transparent) 0,transparent 62%);mix-blend-mode:screen;opacity:.55}
+
+/* шапка */
+.ag-head{position:absolute;left:56px;right:56px;top:30px;height:44px;display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid color-mix(in srgb,var(--accent) 34%,transparent)}
+.ag-brand{display:flex;align-items:center;gap:12px;font:500 17px/1 var(--serif);letter-spacing:.2em;color:var(--text);padding-bottom:10px}
+.ag-brand svg{width:34px;height:27px;color:var(--text)}
+.ag-brand b{font-weight:500;color:var(--accent)}
+.ag-event{padding-bottom:10px}
+
+.ag-scr{position:absolute;inset:0;pointer-events:none;opacity:0}
+.ag-scr.on{pointer-events:auto}
+
+/* заставка */
+.ag-attract .k{left:96px;top:196px}
+.ag-attract h1{left:92px;top:232px;font:300 80px/1.02 var(--serif);letter-spacing:-.02em;color:var(--text)}
+.ag-attract h1 em{display:block}
+.ag-attract p{left:96px;top:470px;width:560px;font-size:20px;line-height:1.55;color:var(--muted)}
+.ag-cta{left:96px;top:636px;display:flex;align-items:center;gap:18px;font:500 15px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--text)}
+.ag-cta .dot{position:relative;width:16px;height:16px;border-radius:50%;background:var(--accent)}
+.ag-cta .ring{position:absolute;left:50%;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;border:1.5px solid var(--accent)}
+
+/* подпись */
+.ag-sign h2,.ag-an h2{left:140px;top:104px;font:300 44px/1.1 var(--serif);letter-spacing:-.015em}
+.ag-sign .k{right:140px;top:124px}
+.ag-btn{position:absolute;height:60px;padding:0 30px;border-radius:30px;display:flex;align-items:center;gap:12px;
+  font:500 15px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;cursor:pointer}
+.ag-btn.ghost{border:1.5px solid color-mix(in srgb,var(--text) 40%,transparent);color:var(--text)}
+.ag-btn.solid{background:var(--accent);color:var(--bg);font-weight:600}
+.ag-btn svg{width:18px;height:18px}
+
+/* карточка с подписью */
+.ag-card{position:absolute;left:0;top:0;width:1000px;height:440px;transform-origin:0 0;border-radius:20px;background:var(--paper);
+  box-shadow:0 30px 80px rgba(0,0,0,.38),0 2px 0 rgba(255,255,255,.5) inset;opacity:0}
+.ag-card .tex{position:absolute;inset:0;border-radius:20px;overflow:hidden}
+.ag-card canvas{position:absolute;left:0;top:0;width:1000px;height:440px}
+.ag-card .base{position:absolute;left:70px;right:70px;top:318px;border-top:2px dashed color-mix(in srgb,var(--ink) 22%,transparent)}
+.ag-card .x{position:absolute;left:58px;top:276px;font:300 40px/1 var(--serif);color:var(--seal)}
+.ag-card .cl{position:absolute;left:72px;top:350px;font:500 13px/1 var(--mono);letter-spacing:.16em;color:color-mix(in srgb,var(--ink) 45%,transparent)}
+.ag-card .cr{position:absolute;right:72px;top:350px;font:500 13px/1 var(--mono);letter-spacing:.16em;color:color-mix(in srgb,var(--ink) 45%,transparent)}
+
+/* анализ */
+.ag-an .k{right:48px;top:124px}
+.ag-rows{position:absolute;left:836px;top:168px;width:396px}
+.ag-row{position:relative;height:72px;border-top:1px solid color-mix(in srgb,var(--text) 14%,transparent);opacity:0}
+.ag-row .n{position:absolute;left:0;top:12px;font:500 12px/1 var(--mono);letter-spacing:.16em;color:var(--muted)}
+.ag-row .v{position:absolute;right:0;top:4px;font:300 34px/1.1 var(--serif);color:var(--text);font-variant-numeric:tabular-nums}
+.ag-row .d{position:absolute;left:0;top:34px;font-size:15px;color:var(--text);opacity:.8}
+.ag-row .tr{position:absolute;left:0;right:0;bottom:8px;height:2px;background:color-mix(in srgb,var(--text) 12%,transparent)}
+.ag-row .fi{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--accent)}
+.ag-status{position:absolute;left:48px;top:540px;width:740px}
+.ag-status .t{font:300 26px/1.2 var(--serif);color:var(--text)}
+.ag-status .bar{margin-top:18px;height:3px;background:color-mix(in srgb,var(--text) 14%,transparent);position:relative}
+.ag-status .bar i{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--accent)}
+.ag-status .pc{position:absolute;right:0;top:6px;font:500 13px/1 var(--mono);letter-spacing:.14em;color:var(--accent)}
+
+/* результат */
+.ag-res .k{left:584px;top:128px}
+.ag-res h3{left:580px;top:154px;width:650px;font:300 60px/1.02 var(--serif);letter-spacing:-.02em;color:var(--text)}
+.ag-res .txt{left:584px;top:292px;width:640px;font-size:18.5px;line-height:1.55;color:color-mix(in srgb,var(--text) 88%,transparent);min-height:200px}
+.ag-res .txt .caret{display:inline-block;width:2px;height:22px;background:var(--accent);vertical-align:-4px;margin-left:2px}
+.ag-facets{left:584px;top:506px;width:640px;display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+.ag-facets>div{border-top:1px solid color-mix(in srgb,var(--accent) 45%,transparent);padding-top:10px}
+.ag-facets p{margin-top:8px;font:300 19px/1.3 var(--serif);color:var(--text)}
+.ag-traits{position:absolute;left:56px;top:370px;width:460px}
+.ag-traits .h{margin-bottom:6px}
+.ag-tr{position:relative;height:38px;opacity:0}
+.ag-tr span{position:absolute;left:0;top:8px;font-size:16px;color:var(--text)}
+.ag-tr b{position:absolute;right:0;top:6px;font:500 15px/1.4 var(--mono);color:var(--accent)}
+.ag-tr .tr{position:absolute;left:0;right:0;bottom:6px;height:2px;background:color-mix(in srgb,var(--text) 12%,transparent)}
+.ag-tr .fi{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--accent)}
+.ag-foot{position:absolute;left:56px;right:56px;top:690px;height:70px;display:flex;align-items:center;justify-content:space-between;
+  border-top:1px solid color-mix(in srgb,var(--accent) 34%,transparent)}
+.ag-next{position:relative;height:56px;padding:0 26px 0 64px;border-radius:28px;border:1.5px solid color-mix(in srgb,var(--text) 40%,transparent);
+  display:flex;align-items:center;font:500 14px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;cursor:pointer;color:var(--text)}
+.ag-next svg{position:absolute;left:14px;top:12px;width:32px;height:32px}
+
+/* стилус (режим съёмки) и касание */
+.ag-pen{position:absolute;left:0;top:0;width:60px;height:470px;transform-origin:30px 466px;pointer-events:none;opacity:0;
+  filter:drop-shadow(26px 30px 16px rgba(0,0,0,.35))}
+.ag-tap{position:absolute;width:80px;height:80px;margin:-40px 0 0 -40px;border-radius:50%;border:2px solid var(--accent);opacity:0;pointer-events:none}
+
+.ag-graph{position:absolute;left:48px;top:628px;width:740px}
+.ag-graph canvas{display:block;width:740px;height:92px;margin-top:10px}
+
+.ag-qr{position:absolute;left:56px;top:556px;width:460px;height:118px;display:flex;gap:18px;align-items:center;opacity:0;
+  border:1px solid color-mix(in srgb,var(--accent) 55%,transparent);border-radius:14px;padding:10px 16px 10px 10px;background:color-mix(in srgb,var(--bg) 60%,transparent)}
+.ag-qr .code{flex:0 0 96px;height:96px;background:var(--paper);border-radius:8px;padding:7px;color:var(--ink)}
+.ag-qr .code svg{display:block;width:100%;height:100%}
+.ag-qr p{margin-top:6px;font-size:15.5px;line-height:1.38;color:color-mix(in srgb,var(--text) 86%,transparent)}
+.ag-qr p b{font-weight:500;color:var(--text)}

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Автограф-сессия с ИИ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&family=Spectral:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap">
+<link rel="stylesheet" href="app.css">
+<style>
+  html,body{margin:0;height:100%;background:#07140f;color:#f1ece2;overflow:hidden;color-scheme:dark}
+  #stage{position:absolute;left:50%;top:50%;transform-origin:0 0}
+  #themes{position:fixed;right:14px;bottom:12px;display:flex;gap:6px;font:500 11px/1 "IBM Plex Mono",monospace;letter-spacing:.1em;z-index:5}
+  #themes button{all:unset;cursor:pointer;padding:7px 10px;border-radius:14px;color:rgba(241,236,226,.55);border:1px solid rgba(241,236,226,.18)}
+  #themes button.on{color:#f1ece2;border-color:rgba(241,236,226,.6)}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="themes"><button data-t="vrg">VR GROUP</button><button data-t="corp">КОНФЕРЕНЦИЯ</button><button data-t="ny">НОВЫЙ ГОД</button><button data-t="auto">▶ АВТОПОКАЗ</button></div>
+<script src="app.js"></script>
+<script>
+  const q = new URLSearchParams(location.search), stage = document.getElementById('stage');
+  const app = new AutographApp(stage, { theme: q.get('theme') || 'vrg' });
+  function fit() { const s = Math.min(innerWidth / 1280, innerHeight / 800); stage.style.transform = `scale(${s}) translate(-640px,-400px)`; }
+  addEventListener('resize', fit); fit();
+  const mark = () => document.querySelectorAll('#themes [data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === app.themeName));
+  document.getElementById('themes').addEventListener('click', async e => {
+    const t = e.target.dataset.t; if (!t) return;
+    if (t === 'auto') { if (app.busy) return; if (app.state !== 'attract') await app.toAttract(); await app.start(900, 640); await app.autoSign(Math.floor(Math.random() * 3)); await app.autoDone(); return; }
+    app.setTheme(t); mark();
+  });
+  document.fonts.ready.then(() => { app.toAttract(); mark(); });
+</script>
+</body>
+</html>
