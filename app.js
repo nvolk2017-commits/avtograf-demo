@@ -456,7 +456,8 @@ class AutographApp {
   // ── анализ ──
   async analyseNow() {
     this.busy = true; this.state = 'analyse'; this.ev('analyse');
-    const f = analyse(this.strokes); this.f = f; this.pt = portrait(f);
+    const f = analyse(this.strokes); this.f = f; this.pt = portrait(f); this.pt.src = 'local';
+    this.aiReq = this.opt.api ? this.fetchPortrait(f) : null;
     const rs = rows(f);
     this.el.rows.innerHTML = rs.map(r => `<div class="ag-row"><span class="n">${r[0].toUpperCase()}</span><span class="v">${r[1]}</span><span class="d">${r[2]}</span><span class="tr"><i class="fi"></i></span></div>`).join('');
     const rowEls = [...this.el.rows.children];
@@ -572,8 +573,13 @@ class AutographApp {
 
   // ── результат ──
   async toResult() {
+    if (this.aiReq) {
+      const ai = await Promise.race([this.aiReq, new Promise(r => setTimeout(() => r(null), 7000))]);
+      if (ai) Object.assign(this.pt, { title: ai.title, text: ai.text, facets: ai.facets, src: 'ai' });
+      this.aiReq = null;
+    }
     this.state = 'result'; this.ev('result');
-    const pt = this.pt;
+    const pt = this.pt; this.makeQr();
     this.el.title.innerHTML = pt.title.replace(/ (\S+)$/, ' <em>$1</em>');
     this.layoutRes(); this.fillFacets(pt, 0); this.el.qr.style.opacity = 0; this.el.txt.innerHTML = '';
     this.el.traits.querySelectorAll('.ag-tr').forEach(e => e.remove());
@@ -600,6 +606,29 @@ class AutographApp {
     this.resT0 = performance.now(); this.busy = false; this.ev('done');
   }
 
+  featsOut(f) {
+    return { slant: +f.slant.toFixed(1), press: +f.press.toFixed(2), span: +f.span.toFixed(1), mm: f.mm, connect: f.connect, rise: +f.rise.toFixed(1), strokes: f.strokes };
+  }
+  async fetchPortrait(f) {
+    const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 9000);
+    try {
+      const r = await fetch(this.opt.api, { method: 'POST', signal: ctl.signal, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'short', f: this.featsOut(f), event: this.th.event }) });
+      if (!r.ok) return null;
+      const o = await r.json();
+      return o && o.title && o.text && Array.isArray(o.facets) ? o : null;
+    } catch (e) { return null; } finally { clearTimeout(tm); }
+  }
+  // QR-код ведёт на страницу полного описания: замеры + образ в адресе, без хранения подписи
+  makeQr() {
+    if (!this.opt.fullUrl || !global.qrcode || !this.f) return;
+    const f = this.featsOut(this.f), q = new URLSearchParams({ s: f.slant, p: f.press, w: f.span, h: f.mm, c: f.connect, r: f.rise, n: f.strokes, e: this.themeName, t: this.pt.title });
+    const url = this.opt.fullUrl + '?' + q.toString(); this.qrUrl = url;
+    const qr = global.qrcode(0, 'L'); qr.addData(url); qr.make();
+    const n = qr.getModuleCount(); let d = '';
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (qr.isDark(y, x)) d += `M${x} ${y}h1v1h-1z`;
+    this.el.qr.querySelector('.code').innerHTML = `<svg viewBox="0 0 ${n} ${n}" shape-rendering="crispEdges"><path fill="currentColor" d="${d}"/></svg>`;
+  }
   layoutRes() { this.el.txt.style.top = (154 + this.el.title.offsetHeight + 30) + 'px'; }
   fillFacets(pt, op) {
     this.el.facets.innerHTML = pt.facets.map(([h, t]) => `<div style="opacity:${op}"><div class="lbl">${h}</div><p>${t}</p></div>`).join('');
@@ -621,5 +650,5 @@ class AutographApp {
 }
 
 global.AutographApp = AutographApp;
-global.AutographApp.SIGS = SIGS; global.AutographApp.synthStroke = synthStroke; global.AutographApp.THEMES = THEMES; global.AutographApp.MARKS = MARKS;
+global.AutographApp.SIGS = SIGS; global.AutographApp.portrait = portrait; global.AutographApp.rows = rows; global.AutographApp.synthStroke = synthStroke; global.AutographApp.THEMES = THEMES; global.AutographApp.MARKS = MARKS;
 })(window);

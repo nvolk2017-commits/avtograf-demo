@@ -18,10 +18,13 @@
 <body>
 <div id="stage"></div>
 <div id="themes"><button data-t="vrg">VR GROUP</button><button data-t="corp">КОНФЕРЕНЦИЯ</button><button data-t="ny">НОВЫЙ ГОД</button><button data-t="auto">▶ АВТОПОКАЗ</button><a href="trailer.mp4" target="_blank" rel="noopener" style="all:unset;cursor:pointer;padding:7px 10px;border-radius:14px;color:rgba(241,236,226,.55);border:1px solid rgba(241,236,226,.18)">ТРЕЙЛЕР</a></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script src="config.js"></script>
 <script src="app.js"></script>
 <script>
   const q = new URLSearchParams(location.search), stage = document.getElementById('stage');
-  const app = new AutographApp(stage, { theme: q.get('theme') || 'vrg' });
+  const cfg = window.AG_CONFIG || {}, base = location.href.split(/[?#]/)[0].replace(/[^/]*$/, '');
+  const app = new AutographApp(stage, { theme: q.get('theme') || 'vrg', api: q.get('api') || cfg.api || '', fullUrl: cfg.fullUrl || base + 'full.html' });
   function fit() { const s = Math.min(innerWidth / 1280, innerHeight / 800); stage.style.transform = `scale(${s}) translate(-640px,-400px)`; }
   addEventListener('resize', fit); fit();
   const mark = () => document.querySelectorAll('#themes [data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === app.themeName));

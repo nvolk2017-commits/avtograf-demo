@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Портрет по подписи</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&family=Spectral:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap">
+<style>
+  /* Страница полного описания по QR: тёмный «бархат» темы мероприятия, серифные заголовки, моно-подписи замеров */
+  :root{--bg:#0f2a20;--bg2:#1b4434;--paper:#f1ece2;--text:#f1ece2;--muted:rgba(241,236,226,.66);--accent:#c9a466;--seal:#b23a22;
+    --serif:"Spectral",Georgia,serif;--sans:"Golos Text","Helvetica Neue",Arial,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace;color-scheme:dark}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{background:var(--bg)}
+  body{min-height:100%;background:radial-gradient(120% 60% at 20% 0%,var(--bg2),var(--bg) 70%);color:var(--text);font:400 17px/1.6 var(--sans);
+    padding:max(20px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) 48px max(20px,env(safe-area-inset-left))}
+  main{max-width:640px;margin:0 auto}
+  .head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding-bottom:14px;border-bottom:1px solid color-mix(in srgb,var(--accent) 35%,transparent)}
+  .brand{display:flex;align-items:center;gap:10px;font:500 15px/1 var(--serif);letter-spacing:.2em}
+  .brand svg{width:30px;height:24px}
+  .brand b{font-weight:500;color:var(--accent)}
+  .lbl{font:500 11.5px/1.3 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+  .lbl.dim{color:var(--muted)}
+  h1{margin-top:34px;font:300 clamp(40px,11vw,60px)/1.02 var(--serif);letter-spacing:-.02em;text-wrap:balance}
+  h1 em{font-style:italic;color:var(--accent)}
+  .intro{margin-top:16px;font:300 21px/1.45 var(--serif);color:var(--text)}
+  .metrics{margin-top:28px;display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid color-mix(in srgb,var(--text) 16%,transparent)}
+  .m{padding:12px 10px 12px 0;border-bottom:1px solid color-mix(in srgb,var(--text) 16%,transparent)}
+  .m .v{font:300 28px/1.1 var(--serif);font-variant-numeric:tabular-nums;margin-top:4px}
+  .m .d{font-size:13px;line-height:1.3;color:var(--muted);margin-top:2px}
+  section{margin-top:30px}
+  section h2{font:400 26px/1.15 var(--serif);letter-spacing:-.01em;display:flex;gap:12px;align-items:baseline}
+  section h2 i{font:500 12px/1 var(--mono);color:var(--accent);font-style:normal;letter-spacing:.1em}
+  section p{margin-top:10px;color:color-mix(in srgb,var(--text) 88%,transparent)}
+  .wait{margin-top:30px;font:italic 300 22px/1.4 var(--serif);color:var(--accent)}
+  .wait span{display:inline-block;width:1.2em;text-align:left}
+  .src{margin-top:40px;padding-top:14px;border-top:1px solid color-mix(in srgb,var(--text) 14%,transparent);font-size:13.5px;line-height:1.5;color:var(--muted)}
+  @media (max-width:380px){.metrics{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<main>
+  <div class="head"><div class="brand"><span id="mk"></span><span id="bn"></span></div><div class="lbl dim" id="ev"></div></div>
+  <div class="lbl" style="margin-top:28px">Полное описание · по вашей подписи</div>
+  <h1 id="title"></h1>
+  <p class="intro" id="intro"></p>
+  <div class="metrics" id="metrics"></div>
+  <div class="wait" id="wait">ИИ дописывает подробный портрет<span id="dots"></span></div>
+  <div id="sections"></div>
+  <p class="src" id="src">Портрет составлен по замерам вашей подписи: наклону, нажиму, размаху, высоте и связности букв. Саму подпись мы не сохраняем. Это развлечение, а не психологический тест.</p>
+</main>
+<script src="config.js"></script>
+<script src="app.js"></script>
+<script>
+  const A = window.AutographApp, q = new URLSearchParams(location.search), cfg = window.AG_CONFIG || {};
+  const num = (k, d) => { const v = parseFloat(q.get(k)); return Number.isFinite(v) ? v : d; };
+  const f = { slant: num('s', 0), press: num('p', .5), span: num('w', 3), mm: num('h', 11), connect: num('c', 75), rise: num('r', 0), strokes: num('n', 1) };
+  const thName = A.THEMES[q.get('e')] ? q.get('e') : 'vrg', th = A.THEMES[thName];
+  for (const k of ['bg', 'bg2', 'text', 'muted', 'accent', 'seal']) document.documentElement.style.setProperty('--' + k, th[k]);
+  document.getElementById('mk').innerHTML = A.MARKS[th.mark]; document.getElementById('bn').innerHTML = th.brand; document.getElementById('ev').textContent = th.event;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const local = A.portrait(f), title = (q.get('t') || local.title).slice(0, 40);
+  const setTitle = t => { document.getElementById('title').innerHTML = esc(t).replace(/ (\S+)$/, ' <em>$1</em>'); document.title = t + ' — портрет по подписи'; };
+  setTitle(title);
+  document.getElementById('metrics').innerHTML = A.rows(f).map(r => `<div class="m"><div class="lbl dim">${r[0]}</div><div class="v">${r[1]}</div><div class="d">${r[2]}</div></div>`).join('');
+  const draw = (intro, secs) => {
+    document.getElementById('intro').textContent = intro;
+    document.getElementById('sections').innerHTML = secs.map((s, i) => `<section><h2><i>${String(i + 1).padStart(2, '0')}</i>${esc(s.h)}</h2><p>${esc(s.text)}</p></section>`).join('');
+    document.getElementById('wait').remove(); clearInterval(dt);
+  };
+  const fallback = () => draw(local.text.split('. ').slice(0, 1).join('. ') + '.', [
+    { h: 'Характер', text: local.text },
+    ...local.facets.map(([h, t]) => ({ h, text: t })),
+    { h: 'Ваши суперсилы', text: local.traits.map(([n, v]) => `${n} — ${v} %`).join(' · ') },
+  ]);
+  let d = 0; const dt = setInterval(() => { document.getElementById('dots').textContent = '.'.repeat(d++ % 4); }, 400);
+  if (!cfg.api) fallback();
+  else fetch(cfg.api, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'full', f, event: th.event, title }) })
+    .then(r => r.ok ? r.json() : null)
+    .then(o => { if (!o || !Array.isArray(o.sections)) return fallback(); if (o.title && !q.get('t')) setTitle(o.title); draw(o.intro || '', o.sections); })
+    .catch(fallback);
+</script>
+</body>
+</html>
