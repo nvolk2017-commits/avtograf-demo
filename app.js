@@ -616,8 +616,14 @@ class AutographApp {
       // график: нажим с датчика, а без датчика — скорость пера (честно подписываем, что это)
       if (this.f.hasPressure) this.gv = all.map(p => typeof p.pr === 'number' ? p.pr : 0);
       else {
-        const v = all.map((p, i) => { const q = all[i - 1]; return q && p.ts > q.ts ? Math.hypot(p.x - q.x, p.y - q.y) / (p.ts - q.ts) : 0; });
-        const sm = v.map((_, i) => { let s = 0, k = 0; for (let j = Math.max(0, i - 4); j <= Math.min(v.length - 1, i + 4); j++) { s += v[j]; k++; } return s / k; });
+        // скорость по окну из соседних точек: точки приходят пачками за кадр, мгновенная скорость была бы «зубчатой»
+        const K = 8, seglen = all.map((p, i) => i && all[i - 1] ? Math.hypot(p.x - all[i - 1].x, p.y - all[i - 1].y) : 0);
+        const v = all.map((p, i) => {
+          const a = Math.max(0, i - K), b = Math.min(all.length - 1, i + K), dt = all[b].ts - all[a].ts;
+          let d = 0; for (let j = a + 1; j <= b; j++) d += seglen[j] > 60 ? 0 : seglen[j];   // прыжок между росчерками не считаем
+          return dt > 0 ? d / dt : 0;
+        });
+        const sm = v.map((_, i) => { let s = 0, k = 0; for (let j = Math.max(0, i - 3); j <= Math.min(v.length - 1, i + 3); j++) { s += v[j]; k++; } return s / k; });
         const mx = Math.max(...sm) || 1; this.gv = sm.map(x => x / mx);
       }
       this.el.graphLbl.textContent = 'Скорость пера по ходу росчерка';

@@ -105,5 +105,6 @@
 .ag-rows.compact .ag-row{height:54px}
 .ag-rows.compact .ag-row .n{top:9px}
 .ag-rows.compact .ag-row .v{top:3px;font-size:28px}
-.ag-rows.compact .ag-row .d{top:27px;font-size:14px}
+.ag-rows.compact .ag-row .d{top:26px;font-size:14px}
+.ag-rows.compact .ag-row .tr{bottom:3px}
 .ag-row.off .v,.ag-row.off .d{opacity:.5}

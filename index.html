@@ -40,7 +40,7 @@
   const app = new AutographApp(stage, { theme: q.get('theme') || 'vrg', api: q.get('api') || cfg.api || '', fullUrl: cfg.fullUrl || base + 'full.html' });
   function fit() { const s = Math.min(innerWidth / 1280, innerHeight / 800); stage.style.transform = `scale(${s}) translate(-640px,-400px)`; }
   addEventListener('resize', fit); fit();
-  const mark = () => document.querySelectorAll('#themes [data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === app.themeName));
+  const mark = () => { document.querySelectorAll('#themes [data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === app.themeName)); document.documentElement.style.background = document.body.style.background = app.th.bg; };
   document.getElementById('themes').addEventListener('click', async e => {
     const t = e.target.dataset.t; if (!t) return;
     if (t === 'auto') { if (app.busy) return; if (app.state !== 'attract') await app.toAttract(); await app.start(900, 640); await app.autoSign(Math.floor(Math.random() * 3)); await app.autoDone(); return; }
