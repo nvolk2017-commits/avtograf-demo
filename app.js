@@ -87,12 +87,15 @@ function synthStroke(d, dur, seed) {
 }
 
 // ───────── признаки почерка из точек ─────────
-function analyse(strokes) {
+// Честный разбор: всё считается по реальным точкам. Нажим и угол пера — только с датчиков стилуса;
+// если датчика нет, признак помечается «нет данных» и в выводы не идёт.
+// mmPerUnit — сколько миллиметров экрана в одной единице холста (по умолчанию для планшета ~10,9″).
+function analyse(strokes, mmPerUnit = 0.175) {
   const all = strokes.flat();
-  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, L = 0, turn = 0, P = 0;
-  for (const p of all) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); P += p.p; }
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, turn = 0;
+  for (const p of all) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
   const lens = strokes.map(s => { let l = 0; for (let i = 1; i < s.length; i++) l += Math.hypot(s[i].x - s[i - 1].x, s[i].y - s[i - 1].y); return l; });
-  L = lens.reduce((a, b) => a + b, 0) || 1;
+  const L = lens.reduce((a, b) => a + b, 0) || 1;
   // наклон: отрезки, идущие ближе к вертикали
   let sx = 0, sw = 0; const verts = [];
   for (const s of strokes) for (let i = 6; i < s.length; i += 3) {
@@ -106,42 +109,72 @@ function analyse(strokes) {
       turn += Math.abs(Math.atan2(Math.sin(a2 - a1), Math.cos(a2 - a1)));
     }
   }
-  const slant = clamp(sw ? sx / sw * 180 / Math.PI : 0, -35, 35);
-  // строка: регрессия нижних точек основного штриха
+  const slant = clamp(sw ? sx / sw * 180 / Math.PI : 0, -40, 40);
+  // строка: регрессия по самому длинному росчерку
   const main = strokes[lens.indexOf(Math.max(...lens))];
   let n = 0, mx = 0, my = 0, mxx = 0, mxy = 0;
   for (const p of main) { n++; mx += p.x; my += p.y; mxx += p.x * p.x; mxy += p.x * p.y; }
   const slope = (n * mxy - mx * my) / Math.max(1, n * mxx - mx * mx);
-  const rise = clamp(-Math.atan(slope) * 180 / Math.PI, -15, 15);
+  const rise = clamp(-Math.atan(slope) * 180 / Math.PI, -20, 20);
   const bw = x1 - x0, bh = Math.max(20, y1 - y0);
+  // нажим — только реальные значения с датчика (pr), без подмен
+  const prs = all.map(p => p.pr).filter(v => typeof v === 'number');
+  const pm = prs.length ? prs.reduce((a, b) => a + b, 0) / prs.length : 0;
+  const psd = prs.length ? Math.sqrt(prs.reduce((a, b) => a + (b - pm) * (b - pm), 0) / prs.length) : 0;
+  const hasPressure = prs.length > all.length * 0.7 && psd > 0.012 && pm > 0.02;
+  // угол пера к экрану — только если стилус его отдаёт
+  const tilts = all.map(p => p.tilt).filter(v => typeof v === 'number');
+  const hasTilt = tilts.length > all.length * 0.7 && Math.max(...tilts) - Math.min(...tilts) > 0.5;
+  const tilt = hasTilt ? tilts.reduce((a, b) => a + b, 0) / tilts.length : null;
+  // время и темп: по отметкам времени, только пока перо касается экрана
+  let down = 0; for (const s of strokes) if (s.length > 1) down += Math.max(0, (s[s.length - 1].ts - s[0].ts) / 1000);
+  const span0 = all.length > 1 ? (all[all.length - 1].ts - all[0].ts) / 1000 : 0;
+  const hasTime = down > 0.25;
+  const speed = hasTime ? L * mmPerUnit / down : null;
   const f = {
     box: { x0, y0, x1, y1 }, slant, rise, slope, b: (my - slope * mx) / Math.max(1, n),
-    press: P / all.length, span: bw / bh, mm: Math.round(bh * 0.056),
-    connect: Math.round(Math.max(...lens) / L * 100), round: turn / L * 100, strokes: strokes.length, verts,
+    hasPressure, press: hasPressure ? pm : null, pressSd: hasPressure ? psd : null, pressMax: hasPressure ? Math.max(...prs) : null,
+    hasTilt, tilt, speed: speed && Math.round(speed), time: hasTime ? +span0.toFixed(1) : null,
+    span: bw / bh, mm: Math.round(bh * mmPerUnit), widthMm: Math.round(bw * mmPerUnit),
+    connect: Math.round(Math.max(...lens) / L * 100), round: turn / L * 100, strokes: strokes.length, points: all.length, verts,
   };
-  // три самых выразительных «вертикали» для разметки наклона
   f.guides = verts.slice().sort((a, b) => b.l - a.l).filter((v, i, arr) => arr.findIndex(u => Math.abs(u.x - v.x) < 90) === i).slice(0, 3);
-  f.peaks = all.map((p, i) => ({ p, i })).sort((a, b) => b.p.p - a.p.p).filter((v, i, arr) => arr.findIndex(u => Math.hypot(u.p.x - v.p.x, u.p.y - v.p.y) < 140) === i).slice(0, 3).map(v => v.p);
+  f.peaks = hasPressure ? all.filter(p => typeof p.pr === 'number').sort((a, b) => b.pr - a.pr).filter((v, i, arr) => arr.findIndex(u => Math.hypot(u.x - v.x, u.y - v.y) < 140) === i).slice(0, 3) : [];
   return f;
 }
 
+// строки замеров: [название, значение, что значит, доля для полоски, ключ]
 function rows(f) {
   const sg = v => (v > 0.5 ? '+' : v < -0.5 ? '−' : '') + Math.abs(Math.round(v));
-  return [
-    ['Наклон', sg(f.slant) + '°', f.slant > 6 ? 'вправо — открытость' : f.slant < -6 ? 'влево — сдержанность' : 'прямой — баланс', clamp(0.5 + f.slant / 50, .08, 1)],
-    ['Нажим', Math.round(f.press * 100) + NB + '%', f.press > 0.58 ? 'сильный — энергия' : f.press < 0.4 ? 'лёгкий — чуткость' : 'ровный — уверенность', f.press],
-    ['Размах', '×' + f.span.toFixed(1).replace('.', ','), f.span > 3.2 ? 'широкий — масштаб' : f.span < 2 ? 'компактный — фокус' : 'средний — гибкость', clamp(f.span / 5, .1, 1)],
-    ['Высота букв', f.mm + NB + 'мм', f.mm >= 13 ? 'крупные — лидерство' : f.mm <= 8 ? 'мелкие — внимание к деталям' : 'средние — открытость', clamp(f.mm / 18, .1, 1)],
-    ['Связность', f.connect + NB + '%', f.connect > 80 ? 'слитная — логика' : f.connect < 60 ? 'раздельная — интуиция' : 'смешанная — гибкость', f.connect / 100],
-    ['Строка', sg(f.rise) + '°', f.rise > 2 ? 'вверх — оптимизм' : f.rise < -2 ? 'вниз — осторожность' : 'ровно — стабильность', clamp(0.5 + f.rise / 20, .08, 1)],
+  const r = [
+    ['Наклон', sg(f.slant) + '°', f.slant > 6 ? 'вправо — открытость' : f.slant < -6 ? 'влево — сдержанность' : 'прямой — баланс', clamp(0.5 + f.slant / 50, .08, 1), 'slant'],
+    f.hasPressure
+      ? ['Нажим', Math.round(f.press * 100) + NB + '%', (f.press > 0.55 ? 'сильный' : f.press < 0.32 ? 'лёгкий' : 'средний') + (f.pressSd < 0.1 ? ' и ровный' : ' и живой'), f.press, 'press']
+      : ['Нажим', '—', 'нет датчика нажима', 0, 'press'],
+    ['Размах', '×' + f.span.toFixed(1).replace('.', ','), f.span > 3.2 ? 'широкий — масштаб' : f.span < 2 ? 'компактный — фокус' : 'средний — гибкость', clamp(f.span / 5, .1, 1), 'span'],
+    ['Высота подписи', f.mm + NB + 'мм', f.mm >= 45 ? 'крупная — на виду' : f.mm <= 22 ? 'компактная — к деталям' : 'средняя — открытость', clamp(f.mm / 70, .1, 1), 'mm'],
+    ['Связность', f.connect + NB + '%', f.connect > 80 ? 'слитная — логика' : f.connect < 60 ? 'раздельная — интуиция' : 'смешанная — гибкость', f.connect / 100, 'connect'],
+    ['Строка', sg(f.rise) + '°', f.rise > 2 ? 'вверх — оптимизм' : f.rise < -2 ? 'вниз — осторожность' : 'ровно — стабильность', clamp(0.5 + f.rise / 20, .08, 1), 'rise'],
   ];
+  if (f.speed) r.push(['Темп', f.speed + NB + 'мм/с', f.speed > 140 ? 'быстрый — решительность' : f.speed < 60 ? 'размеренный — обстоятельность' : 'уверенный — ритм', clamp(f.speed / 220, .08, 1), 'speed']);
+  if (f.hasTilt) r.push(['Угол пера', Math.round(f.tilt) + '°', f.tilt < 45 ? 'пологий — свобода' : f.tilt > 65 ? 'крутой — собранность' : 'средний — уверенность', clamp(f.tilt / 90, .08, 1), 'tilt']);
+  return r;
 }
+const rowOf = (f, key) => rows(f).find(r => r[4] === key) || ['', '', '', 0, key];
 
 const TRAIT = { energy: 'Драйв', lead: 'Лидерство', open: 'Общительность', crea: 'Креатив', prec: 'Точность' };
+// образы: по 4–5 на пару сильных сторон, выбор зависит от самих замеров
 const TITLES = {
-  'energy+lead': 'Энергичный стратег', 'energy+open': 'Вдохновитель команды', 'crea+energy': 'Генератор идей', 'energy+prec': 'Точный игрок',
-  'lead+open': 'Прирождённый капитан', 'crea+lead': 'Смелый новатор', 'lead+prec': 'Надёжный архитектор', 'crea+open': 'Творческий дипломат',
-  'open+prec': 'Внимательный наставник', 'crea+prec': 'Изобретательный мастер',
+  'energy+lead': ['Энергичный стратег', 'Капитан дедлайнов', 'Мотор с рулём', 'Генерал хорошего настроения', 'Человек-план'],
+  'energy+open': ['Вдохновитель команды', 'Батарейка опенспейса', 'Душа любого созвона', 'Ходячий тимбилдинг', 'Заводила с дипломом'],
+  'crea+energy': ['Генератор идей', 'Мозговой штурм в одном лице', 'Фонтан креатива', 'Изобретатель на скорости', 'Искра в розетке'],
+  'energy+prec': ['Точный игрок', 'Снайпер задач', 'Метроном с огоньком', 'Скоростной перфекционист'],
+  'lead+open': ['Прирождённый капитан', 'Дипломат с характером', 'Тот, за кем идут', 'Главный по общему делу', 'Президент кофе-брейка'],
+  'crea+lead': ['Смелый новатор', 'Архитектор смелых идей', 'Капитан эксперимента', 'Режиссёр перемен'],
+  'lead+prec': ['Надёжный архитектор', 'Скала в пиджаке', 'Главный по порядку', 'Регламент с душой'],
+  'crea+open': ['Творческий дипломат', 'Художник общения', 'Сказочник переговоров', 'Креативный миротворец'],
+  'open+prec': ['Внимательный наставник', 'Тихий гений деталей', 'Добрый аудитор', 'Наставник со стажем'],
+  'crea+prec': ['Изобретательный мастер', 'Ювелир идей', 'Инженер чудес', 'Часовщик креатива'],
 };
 const CLOSERS = {
   energy: 'Вы из тех, кто зажигает команду идеей и доводит её до результата.',
@@ -181,30 +214,48 @@ const TIPS = {
 };
 
 function portrait(f) {
+  const pr = f.hasPressure ? f.press : 0.45;                 // без датчика нажим в выводы не идёт
+  const sp = f.speed ? clamp((f.speed - 90) / 120, -0.2, 0.25) : 0;
   const sc = {
-    energy: 0.32 + f.press * 0.38 + clamp((f.span - 2) * 0.07, -0.1, 0.2) + f.rise * 0.01,
-    lead: 0.3 + clamp(f.mm / 16, 0, 1) * 0.32 + f.press * 0.28,
+    energy: 0.32 + pr * 0.3 + clamp((f.span - 2) * 0.07, -0.1, 0.2) + f.rise * 0.01 + sp,
+    lead: 0.3 + clamp(f.mm / 60, 0, 1) * 0.32 + pr * 0.24,
     open: 0.42 + f.slant / 35 * 0.38 + f.rise / 12 * 0.12,
     crea: 0.3 + clamp(f.round / 6, 0, 1) * 0.36 + (1 - f.connect / 100) * 0.3 + (f.strokes > 1 ? 0.08 : 0),
-    prec: 0.32 + f.connect / 100 * 0.3 + (1 - Math.abs(f.slant) / 35) * 0.2,
+    prec: 0.32 + f.connect / 100 * 0.3 + (1 - Math.abs(f.slant) / 35) * 0.2 - sp * 0.5,
   };
   const keys = Object.keys(sc).sort((a, b) => sc[b] - sc[a]);
-  const top = keys.slice(0, 2), title = TITLES[top.slice().sort().join('+')] || 'Яркая личность';
+  const top = keys.slice(0, 2), pool = TITLES[top.slice().sort().join('+')] || ['Яркая личность'];
+  const h = Math.abs(Math.round(f.slant * 7 + f.span * 13 + f.mm * 3 + f.connect + f.rise * 5 + (f.speed || 0)));
+  const title = pool[h % pool.length];
   const lo = Math.min(...Object.values(sc)), hi = Math.max(...Object.values(sc));
   const traits = keys.slice(0, 4).map(k => [TRAIT[k], Math.round(62 + (sc[k] - lo) / Math.max(.01, hi - lo) * 32)]);
-  const s1 = f.slant > 6 ? `Наклон вправо (${rows(f)[0][1]}) выдаёт человека, который тянется к людям и легко идёт навстречу новому.`
-    : f.slant < -6 ? `Наклон влево (${rows(f)[0][1]}) — признак сдержанности: вы сначала думаете, потом говорите, и поэтому вас слушают.`
-    : 'Почти вертикальные буквы говорят о балансе разума и чувств: вы не теряете голову даже в аврал.';
-  const s2 = f.span > 3.2 ? 'Широкий размах росчерка — любовь к большим задачам и простору для решений.'
-    : f.press > 0.58 ? 'Уверенный нажим выдаёт энергию, которой хватает и на работу, и на праздник.'
+  const sl = rowOf(f, 'slant')[1];
+  const s1 = f.slant > 6 ? `Наклон вправо (${sl}) выдаёт человека, который тянется к людям и легко идёт навстречу новому.`
+    : f.slant < -6 ? `Наклон влево (${sl}) — признак сдержанности: вы сначала думаете, потом говорите, и поэтому вас слушают.`
+    : `Почти вертикальные буквы (${sl}) говорят о балансе разума и чувств: вы не теряете голову даже в аврал.`;
+  const s2 = f.hasPressure && f.press > 0.55 ? `Нажим ${rowOf(f, 'press')[1]} — энергии хватит и на работу, и на праздник.`
+    : f.speed && f.speed > 140 ? `Темп ${f.speed} мм/с: вы расписываетесь так, будто опаздываете на собственный успех.`
+    : f.span > 3.2 ? 'Широкий размах росчерка — любовь к большим задачам и простору для решений.'
     : f.connect > 80 ? 'Буквы идут одной линией — вы мыслите последовательно и доводите начатое до конца.'
     : 'Свободные связки букв — признак гибкого ума и хорошей интуиции.';
   const s3 = f.rise > 2 ? 'Строка уходит вверх — вы смотрите в будущее с оптимизмом и заражаете им других.'
     : f.rise < -2 ? 'Строка чуть опускается — вы трезво оцениваете риски и не обещаете лишнего.'
-    : f.mm >= 13 ? 'Крупные буквы выдают желание быть на виду и вести за собой.'
+    : f.mm >= 45 ? 'Крупная подпись выдаёт желание быть на виду и вести за собой.'
     : 'Ровная строка — признак внутренней устойчивости: вас сложно выбить из колеи.';
   return { title, text: `${s1} ${s2} ${s3} ${CLOSERS[top[0]]}`, tip: TIPS[top[0]], traits,
     facets: [['В работе', WORK[top[0]]], ['В команде', TEAM[top[1]]], ['Сегодня', TODAY[top[0]]]] };
+}
+
+const newId = () => Array.from(crypto.getRandomValues(new Uint8Array(9)), b => 'abcdefghjkmnpqrstuvwxyz23456789'[b % 31]).join('');
+
+// датчики стилуса: нажим (0…1) и угол пера к экрану (°). У мыши и пальца их нет — возвращаем null.
+function sensors(e) {
+  if (e.pointerType !== 'pen') return { pr: null, tilt: null };
+  const pr = e.pressure > 0 ? e.pressure : null;
+  let tilt = null;
+  if (typeof e.altitudeAngle === 'number' && e.altitudeAngle > 0) tilt = e.altitudeAngle * 180 / Math.PI;
+  else if (e.tiltX || e.tiltY) tilt = 90 - Math.min(90, Math.hypot(e.tiltX, e.tiltY));
+  return { pr, tilt };
 }
 
 // ───────── приложение ─────────
@@ -259,7 +310,7 @@ class AutographApp {
     this.el = { bg: $('.ag-bg'), glow: $('.ag-glow'), ghost: $('.ag-ghost'), mk: $('.ag-brand .mk'), bn: $('.ag-brand .bn'), event: $('.ag-event'),
       attract: $('.ag-attract'), sign: $('.ag-sign'), an: $('.ag-an'), res: $('.ag-res'), ring: $('.ag-cta .ring'),
       card: $('.ag-card'), ink: $('.ag-card .ink'), ov: $('.ag-card .ov'), cr: $('.ag-card .cr'), rows: $('.ag-rows'),
-      st: $('.ag-status .t'), graph: $('.ag-graph canvas'), stBar: $('.ag-status .bar i'), stPc: $('.ag-status .pc'),
+      st: $('.ag-status .t'), graph: $('.ag-graph canvas'), graphLbl: $('.ag-graph .lbl'), stBar: $('.ag-status .bar i'), stPc: $('.ag-status .pc'),
       title: $('.ag-res h3'), txt: $('.ag-res .txt'), facets: $('.ag-facets'), qr: $('.ag-qr'), traits: $('.ag-traits'), cd: $('.ag-next .cd'),
       pen: $('.ag-pen'), tap: $('.ag-tap') };
     const sz = (c, w, h, d) => { c.width = Math.round(w * d); c.height = Math.round(h * d); const x = c.getContext('2d'); x.setTransform(d, 0, 0, d, 0, 0); return x; };
@@ -337,6 +388,7 @@ class AutographApp {
     x.stroke();
   }
   addPoint(st, p) {
+    if (p.ts == null) p.ts = performance.now();
     st.push(p); const n = st.length;
     if (n === 2) this.inkSeg(st[0], st[1]);
     else if (n > 2) this.inkSeg(st[n - 3], st[n - 2], st[n - 1]);
@@ -359,19 +411,21 @@ class AutographApp {
       if (this.state !== 'sign') return;
       const p = local(e), c = this.cardPos, q = { x: (p.x - c.x) / c.s, y: (p.y - c.y) / c.s };
       if (q.x < 0 || q.y < 0 || q.x > CW || q.y > CH) return;
-      r.setPointerCapture(e.pointerId); cur = []; this.strokes.push(cur); last = { ...q, t: performance.now() };
-      this.addPoint(cur, { x: q.x, y: q.y, p: e.pointerType === 'pen' && e.pressure ? e.pressure : 0.55, t: last.t });
+      r.setPointerCapture(e.pointerId); cur = []; this.strokes.push(cur); last = { ...q, t: e.timeStamp || performance.now() };
+      const sn = sensors(e);
+      this.addPoint(cur, { x: q.x, y: q.y, p: sn.pr != null ? sn.pr : 0.55, pr: sn.pr, tilt: sn.tilt, t: last.t, ts: last.t });
     });
     r.addEventListener('pointermove', e => {
       if (!cur) return;
       const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
       for (const ev of evs) {
-        const p = local(ev), c = this.cardPos, q = { x: (p.x - c.x) / c.s, y: (p.y - c.y) / c.s }, now = performance.now();
+        const p = local(ev), c = this.cardPos, q = { x: (p.x - c.x) / c.s, y: (p.y - c.y) / c.s }, now = ev.timeStamp || performance.now();
         const d = Math.hypot(q.x - last.x, q.y - last.y); if (d < 1.2) continue;
-        const v = d / Math.max(1, now - last.t);
-        const pr = ev.pointerType === 'pen' && ev.pressure ? ev.pressure : clamp(0.85 - v * 0.35, 0.18, 0.9);
-        const prev = cur[cur.length - 1].p, pp = prev * 0.6 + pr * 0.4;
-        this.addPoint(cur, { x: q.x, y: q.y, p: pp, t: now }); last = { ...q, t: now };
+        const v = d / Math.max(1, now - last.t), sn = sensors(ev);
+        // толщина линии: с датчика нажима, а без него — только для красоты по скорости (в замеры не идёт)
+        const w = sn.pr != null ? sn.pr : clamp(0.85 - v * 0.35, 0.18, 0.9);
+        const prev = cur[cur.length - 1].p, pp = prev * 0.6 + w * 0.4;
+        this.addPoint(cur, { x: q.x, y: q.y, p: pp, pr: sn.pr, tilt: sn.tilt, t: now, ts: now }); last = { ...q, t: now };
       }
     });
     const up = () => { cur = null; };
@@ -425,11 +479,11 @@ class AutographApp {
       const st = sts[j], cur = []; this.strokes.push(cur); let idx = 0; this.ev('pendown');
       await this.tween(st[st.length - 1].t * 1000, (k, r) => {
         const tt = r * st[st.length - 1].t;
-        while (idx < st.length && st[idx].t <= tt) { this.addPoint(cur, st[idx]); idx++; }
+        while (idx < st.length && st[idx].t <= tt) { const q = st[idx]; q.pr = q.p; q.tilt = 54 + 7 * Math.sin(idx * 0.02 + j); this.addPoint(cur, q); idx++; }
         const p = st[Math.max(0, idx - 1)], q = this.toRoot(p.x, p.y);
         this.penAt(q.x, q.y, (1 - p.p) * 4, 24 + Math.sin(tt * 3) * 1.5);
       }, E.lin);
-      while (idx < st.length) this.addPoint(cur, st[idx++]);
+      while (idx < st.length) { const q = st[idx++]; q.pr = q.p; q.tilt = 54; this.addPoint(cur, q); }
       this.ev('penup');
       if (j < sts.length - 1) {
         const a = this.toRoot(st[st.length - 1].x, st[st.length - 1].y), b = this.toRoot(sts[j + 1][0].x, sts[j + 1][0].y);
@@ -456,12 +510,16 @@ class AutographApp {
   // ── анализ ──
   async analyseNow() {
     this.busy = true; this.state = 'analyse'; this.ev('analyse');
-    const f = analyse(this.strokes); this.f = f; this.pt = portrait(f); this.pt.src = 'local';
-    this.aiReq = this.opt.api ? this.fetchPortrait(f) : null;
+    const f = analyse(this.strokes, this.mmPerUnit()); this.f = f; this.pt = portrait(f); this.pt.src = 'local';
+    // краткий и полный разборы стартуют одновременно; полный сохраняется в облаке под номером сеанса для QR
+    this.sid = this.opt.api ? newId() : null; this.aiReq = null; this.gv = null;
+    if (this.opt.api) { const img = this.sigImage(); this.aiReq = this.fetchPortrait(f, img); this.postFull(f, img); }
     const rs = rows(f);
-    this.el.rows.innerHTML = rs.map(r => `<div class="ag-row"><span class="n">${r[0].toUpperCase()}</span><span class="v">${r[1]}</span><span class="d">${r[2]}</span><span class="tr"><i class="fi"></i></span></div>`).join('');
+    this.el.rows.classList.toggle('compact', rs.length > 6);
+    this.el.rows.innerHTML = rs.map(r => `<div class="ag-row${r[1] === '—' ? ' off' : ''}"><span class="n">${r[0].toUpperCase()}</span><span class="v">${r[1]}</span><span class="d">${r[2]}</span><span class="tr"><i class="fi"></i></span></div>`).join('');
     const rowEls = [...this.el.rows.children];
-    const ST = ['Сканируем подпись…', 'Измеряем наклон букв…', 'Оцениваем нажим…', 'Считаем размах и высоту…', 'Смотрим, как связаны буквы…', 'Пишем портрет личности…'];
+    const ST = ['Сканируем подпись…', 'Измеряем наклон букв…', f.hasPressure ? 'Читаем датчик нажима…' : 'Датчика нажима нет — пропускаем…', 'Считаем размах и высоту…', f.speed ? 'Засекаем темп росчерка…' : 'Смотрим, как связаны буквы…', 'Пишем портрет личности…'];
+    const step = 0.78 / rs.length;
     await Promise.all([this.fade('sign', 0, 450), this.moveCard({ x: 48, y: 176, s: 0.74 }, 900)]);
     this.fade('an', 1, 500);
     const D = this.opt.anD || 6200, t0 = performance.now(), shown = new Set();
@@ -472,7 +530,7 @@ class AutographApp {
       if (this.el.st.textContent !== ST[si]) this.el.st.textContent = ST[si];
       this.el.stBar.style.width = (a * 100).toFixed(2) + '%'; this.el.stPc.textContent = Math.round(a * 100) + ' %';
       rowEls.forEach((el, i) => {
-        const r = seg(a, 0.1 + i * 0.13, 0.1 + i * 0.13 + 0.12);
+        const r = seg(a, 0.1 + i * step, 0.1 + i * step + 0.12);
         el.style.opacity = r; el.style.transform = `translateX(${(1 - E.out(r)) * 24}px)`;
         el.querySelector('.fi').style.width = (E.out(r) * rs[i][3] * 100).toFixed(1) + '%';
         if (r > 0 && !shown.has(i)) { shown.add(i); this.ev('row'); }
@@ -509,7 +567,7 @@ class AutographApp {
       const xa = f.box.x0 - 30, xb = lerp(xa, f.box.x1 + 30, E.out(ba)), y = x => f.slope * x + f.b;
       c.strokeStyle = th.seal; c.lineWidth = 2; c.setLineDash([10, 8]);
       c.beginPath(); c.moveTo(xa, y(xa)); c.lineTo(xb, y(xb)); c.stroke(); c.setLineDash([]);
-      c.globalAlpha = seg(a, 0.28, 0.34); tag('строка ' + rows(f)[5][1], f.box.x1 + 30, y(f.box.x1 + 30) + 30, 'right'); c.globalAlpha = 1;
+      c.globalAlpha = seg(a, 0.28, 0.34); tag('строка ' + rowOf(f, 'rise')[1], f.box.x1 + 30, y(f.box.x1 + 30) + 30, 'right'); c.globalAlpha = 1;
     }
     // 3. наклон
     const sl = seg(a, 0.3, 0.5);
@@ -520,7 +578,7 @@ class AutographApp {
       c.beginPath(); c.moveTo(g.x - dx, g.y + dy); c.lineTo(g.x + dx, g.y - dy); c.stroke();
       c.globalAlpha = 0.5; c.lineWidth = 1.4; c.beginPath(); c.moveTo(g.x, g.y + len); c.lineTo(g.x, g.y - len); c.stroke(); c.globalAlpha = 1;
       c.beginPath(); c.arc(g.x, g.y, 46 * k, -Math.PI / 2, -Math.PI / 2 + g.a, g.a < 0); c.stroke();
-      if (i === 0) { c.globalAlpha = k; const rt = g.x + 260 > CW; tag('наклон ' + rows(f)[0][1], rt ? g.x - 54 : g.x + 54, g.y - 70, rt ? 'right' : 'left', th.ink); c.globalAlpha = 1; }
+      if (i === 0) { c.globalAlpha = k; const rt = g.x + 260 > CW; tag('наклон ' + rowOf(f, 'slant')[1], rt ? g.x - 54 : g.x + 54, g.y - 70, rt ? 'right' : 'left', th.ink); c.globalAlpha = 1; }
     });
     // 4. размах и высота
     const bb = seg(a, 0.46, 0.64);
@@ -532,7 +590,7 @@ class AutographApp {
       const rx = Math.min(CW - 26, x1 + 26), my = (y0 + y1) / 2;
       c.beginPath(); c.moveTo(rx, my - (my - y0) * k); c.lineTo(rx, my + (y1 - my) * k); c.stroke();
       c.beginPath(); c.moveTo(rx - 8, my - (my - y0) * k); c.lineTo(rx + 8, my - (my - y0) * k); c.moveTo(rx - 8, my + (y1 - my) * k); c.lineTo(rx + 8, my + (y1 - my) * k); c.stroke();
-      c.globalAlpha = k; tag('размах ' + rows(f)[2][1], cx, ty - 12, 'center', th.ink); tag(rows(f)[3][1], rx - 14, y0 + 18, 'right', th.ink); c.globalAlpha = 1;
+      c.globalAlpha = k; tag('размах ' + rowOf(f, 'span')[1], cx, ty - 12, 'center', th.ink); tag(rowOf(f, 'mm')[1], rx - 14, y0 + 18, 'right', th.ink); c.globalAlpha = 1;
     }
     // 5. нажим
     const pa = seg(a, 0.6, 0.8);
@@ -541,7 +599,7 @@ class AutographApp {
       c.strokeStyle = th.seal; c.lineWidth = 2.4; c.globalAlpha = 1;
       c.beginPath(); c.arc(p.x, p.y, 10 + 22 * E.back(k), 0, 7); c.stroke();
       c.globalAlpha = 0.35 * (1 - k); c.beginPath(); c.arc(p.x, p.y, 20 + 50 * k, 0, 7); c.stroke(); c.globalAlpha = 1;
-      if (i === 0) { c.globalAlpha = k; tag('нажим ' + rows(f)[1][1], p.x + 40, p.y + 44); c.globalAlpha = 1; }
+      if (i === 0) { c.globalAlpha = k; tag('нажим ' + rowOf(f, 'press')[1], p.x + 40, p.y + 44); c.globalAlpha = 1; }
     });
     // 6. связность — линия бежит по росчерку
     const ca = seg(a, 0.74, 0.96);
@@ -557,6 +615,17 @@ class AutographApp {
   drawGraph(a) {
     const c = this.cx.graph, all = this.strokes.flat(), n = all.length, gw = 740, gh = 92, th = this.th;
     c.clearRect(0, 0, gw, gh); if (n < 2) return;
+    if (!this.gv) {
+      // график: нажим с датчика, а без датчика — скорость пера (честно подписываем, что это)
+      if (this.f.hasPressure) this.gv = all.map(p => typeof p.pr === 'number' ? p.pr : 0);
+      else {
+        const v = all.map((p, i) => { const q = all[i - 1]; return q && p.ts > q.ts ? Math.hypot(p.x - q.x, p.y - q.y) / (p.ts - q.ts) : 0; });
+        const sm = v.map((_, i) => { let s = 0, k = 0; for (let j = Math.max(0, i - 4); j <= Math.min(v.length - 1, i + 4); j++) { s += v[j]; k++; } return s / k; });
+        const mx = Math.max(...sm) || 1; this.gv = sm.map(x => x / mx);
+      }
+      this.el.graphLbl.textContent = this.f.hasPressure ? 'Нажим по ходу росчерка · датчик стилуса' : 'Скорость пера по ходу росчерка · датчика нажима нет';
+    }
+    const V = this.gv;
     const upto = Math.floor(n * E.inOut(seg(a, 0.05, 0.9)));
     c.strokeStyle = th.text; c.globalAlpha = 0.12; c.lineWidth = 1;
     for (let y = 0; y <= 3; y++) { c.beginPath(); c.moveTo(0, 6 + y * 26 + .5); c.lineTo(gw, 6 + y * 26 + .5); c.stroke(); }
@@ -564,11 +633,11 @@ class AutographApp {
     const X = i => i / (n - 1) * gw, Y = p => gh - 6 - p * (gh - 14);
     const g = c.createLinearGradient(0, 0, 0, gh); g.addColorStop(0, th.accent); g.addColorStop(1, 'rgba(0,0,0,0)');
     c.beginPath(); c.moveTo(0, gh);
-    for (let i = 0; i < upto; i += 2) c.lineTo(X(i), Y(all[i].p));
+    for (let i = 0; i < upto; i += 2) c.lineTo(X(i), Y(V[i]));
     c.lineTo(X(Math.max(0, upto - 1)), gh); c.closePath(); c.globalAlpha = 0.35; c.fillStyle = g; c.fill(); c.globalAlpha = 1;
-    c.beginPath(); for (let i = 0; i < upto; i += 2) i ? c.lineTo(X(i), Y(all[i].p)) : c.moveTo(X(i), Y(all[i].p));
+    c.beginPath(); for (let i = 0; i < upto; i += 2) i ? c.lineTo(X(i), Y(V[i])) : c.moveTo(X(i), Y(V[i]));
     c.strokeStyle = th.accent; c.lineWidth = 2; c.stroke();
-    if (upto > 1 && upto < n) { const p = all[upto - 1]; c.fillStyle = th.accent; c.beginPath(); c.arc(X(upto - 1), Y(p.p), 4.5, 0, 7); c.fill(); }
+    if (upto > 1 && upto < n) { c.fillStyle = th.accent; c.beginPath(); c.arc(X(upto - 1), Y(V[upto - 1]), 4.5, 0, 7); c.fill(); }
   }
 
   // ── результат ──
@@ -578,6 +647,7 @@ class AutographApp {
       if (ai) Object.assign(this.pt, { title: ai.title, text: ai.text, facets: ai.facets, src: 'ai' });
       this.aiReq = null;
     }
+    if (this.opt.api && this.sid) this.post({ mode: 'title', id: this.sid, title: this.pt.title, traits: this.pt.traits }).catch(() => {});
     this.state = 'result'; this.ev('result');
     const pt = this.pt; this.makeQr();
     this.el.title.innerHTML = pt.title.replace(/ (\S+)$/, ' <em>$1</em>');
@@ -606,25 +676,57 @@ class AutographApp {
     this.resT0 = performance.now(); this.busy = false; this.ev('done');
   }
 
-  featsOut(f) {
-    return { slant: +f.slant.toFixed(1), press: +f.press.toFixed(2), span: +f.span.toFixed(1), mm: f.mm, connect: f.connect, rise: +f.rise.toFixed(1), strokes: f.strokes };
+  mmPerUnit() {
+    if (this.opt.mmPerUnit) return this.opt.mmPerUnit;
+    const w = this.root.getBoundingClientRect().width;
+    return (this.opt.mmPerCssPx || 0.19) * (w > 50 ? w / W : 1);   // 0,19 мм — CSS-пиксель планшета ~10–11″
   }
-  async fetchPortrait(f) {
-    const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 9000);
+  featsOut(f) {
+    const r1 = v => v == null ? null : +(+v).toFixed(1), r2 = v => v == null ? null : +(+v).toFixed(2);
+    return { slant: r1(f.slant), rise: r1(f.rise), span: r1(f.span), mm: f.mm, widthMm: f.widthMm, connect: f.connect, strokes: f.strokes,
+      hasPressure: f.hasPressure, press: r2(f.press), pressSd: r2(f.pressSd), pressMax: r2(f.pressMax), hasTilt: f.hasTilt, tilt: r1(f.tilt),
+      speed: f.speed, time: f.time, round: r1(f.round) };
+  }
+  // подпись картинкой (чёрным по белому) — чтобы модель с компьютерным зрением видела саму форму букв
+  sigImage() {
+    const { x0, y0, x1, y1 } = this.f.box, pad = 24, sc = Math.min(560 / Math.max(1, x1 - x0), 240 / Math.max(1, y1 - y0), 1.2);
+    const c = document.createElement('canvas'); c.width = Math.round((x1 - x0) * sc + pad * 2); c.height = Math.round((y1 - y0) * sc + pad * 2);
+    const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+    x.strokeStyle = '#000'; x.lineCap = 'round'; x.lineJoin = 'round';
+    for (const st of this.strokes) for (let i = 1; i < st.length; i++) {
+      x.lineWidth = Math.max(1.2, (1.3 + 6.4 * st[i].p) * sc); x.beginPath();
+      x.moveTo((st[i - 1].x - x0) * sc + pad, (st[i - 1].y - y0) * sc + pad); x.lineTo((st[i].x - x0) * sc + pad, (st[i].y - y0) * sc + pad); x.stroke();
+    }
+    return c.toDataURL('image/png');
+  }
+  post(body, ms = 12000) {
+    const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), ms);
+    return fetch(this.opt.api, { method: 'POST', signal: ctl.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .finally(() => clearTimeout(tm));
+  }
+  async fetchPortrait(f, image) {
     try {
-      const r = await fetch(this.opt.api, { method: 'POST', signal: ctl.signal, headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'short', f: this.featsOut(f), event: this.th.event }) });
+      const r = await this.post({ mode: 'short', id: this.sid, f: this.featsOut(f), event: this.th.event, image }, 9000);
       if (!r.ok) return null;
       const o = await r.json();
       return o && o.title && o.text && Array.isArray(o.facets) ? o : null;
-    } catch (e) { return null; } finally { clearTimeout(tm); }
+    } catch (e) { return null; }
   }
-  // QR-код ведёт на страницу полного описания: замеры + образ в адресе, без хранения подписи
+  postFull(f, image) {
+    this.post({ mode: 'full', id: this.sid, f: this.featsOut(f), event: this.th.event, theme: this.themeName, image }, 60000).catch(() => {});
+  }
+  // QR: с облаком — короткая ссылка на номер сеанса (полный разбор уже готовится); без облака — замеры в адресе
   makeQr() {
     if (!this.opt.fullUrl || !global.qrcode || !this.f) return;
-    const f = this.featsOut(this.f), q = new URLSearchParams({ s: f.slant, p: f.press, w: f.span, h: f.mm, c: f.connect, r: f.rise, n: f.strokes, e: this.themeName, t: this.pt.title });
-    const url = this.opt.fullUrl + '?' + q.toString(); this.qrUrl = url;
-    const qr = global.qrcode(0, 'L'); qr.addData(url); qr.make();
+    let url;
+    if (this.sid) url = this.opt.fullUrl + '?' + new URLSearchParams({ id: this.sid, e: this.themeName }).toString();
+    else {
+      const f = this.featsOut(this.f), q = new URLSearchParams({ s: f.slant, w: f.span, h: f.mm, c: f.connect, r: f.rise, n: f.strokes, e: this.themeName, t: this.pt.title });
+      if (f.hasPressure) q.set('p', f.press); if (f.speed) q.set('v', f.speed);
+      url = this.opt.fullUrl + '?' + q.toString();
+    }
+    this.qrUrl = url;
+    const qr = global.qrcode(0, 'M'); qr.addData(url); qr.make();
     const n = qr.getModuleCount(); let d = '';
     for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (qr.isDark(y, x)) d += `M${x} ${y}h1v1h-1z`;
     this.el.qr.querySelector('.code').innerHTML = `<svg viewBox="0 0 ${n} ${n}" shape-rendering="crispEdges"><path fill="currentColor" d="${d}"/></svg>`;
@@ -637,8 +739,8 @@ class AutographApp {
   // мгновенно показать готовый результат (для витрины тем в трейлере)
   instantResult(i = 0) {
     const sg = SIGS[i % SIGS.length]; this.clearInk(); this.clearGhost();
-    for (let j = 0; j < sg.strokes.length; j++) { const st = synthStroke(sg.strokes[j], sg.dur[j], 1 + j + i), cur = []; this.strokes.push(cur); for (const p of st) this.addPoint(cur, p); }
-    this.f = analyse(this.strokes); this.pt = portrait(this.f);
+    for (let j = 0; j < sg.strokes.length; j++) { const st = synthStroke(sg.strokes[j], sg.dur[j], 1 + j + i), cur = []; this.strokes.push(cur); for (const p of st) { p.pr = p.p; p.tilt = 55; p.ts = p.t * 1000; this.addPoint(cur, p); } }
+    this.f = analyse(this.strokes, this.mmPerUnit()); this.pt = portrait(this.f);
     const pt = this.pt; this.state = 'result';
     this.el.title.innerHTML = pt.title.replace(/ (\S+)$/, ' <em>$1</em>'); this.el.txt.textContent = pt.text; this.layoutRes(); this.fillFacets(pt, 1); this.el.qr.style.opacity = 1;
     this.el.traits.querySelectorAll('.ag-tr').forEach(e => e.remove());

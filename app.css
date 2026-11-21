@@ -101,3 +101,9 @@
 .ag-qr .code svg{display:block;width:100%;height:100%}
 .ag-qr p{margin-top:6px;font-size:15.5px;line-height:1.38;color:color-mix(in srgb,var(--text) 86%,transparent)}
 .ag-qr p b{font-weight:500;color:var(--text)}
+
+.ag-rows.compact .ag-row{height:54px}
+.ag-rows.compact .ag-row .n{top:9px}
+.ag-rows.compact .ag-row .v{top:3px;font-size:28px}
+.ag-rows.compact .ag-row .d{top:27px;font-size:14px}
+.ag-row.off .v,.ag-row.off .d{opacity:.5}

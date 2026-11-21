@@ -34,6 +34,8 @@
   section p{margin-top:10px;color:color-mix(in srgb,var(--text) 88%,transparent)}
   .wait{margin-top:30px;font:italic 300 22px/1.4 var(--serif);color:var(--accent)}
   .wait span{display:inline-block;width:1.2em;text-align:left}
+  .m.off .v,.m.off .d{opacity:.5}
+  .wait.err{font-style:normal;color:var(--muted)}
   .src{margin-top:40px;padding-top:14px;border-top:1px solid color-mix(in srgb,var(--text) 14%,transparent);font-size:13.5px;line-height:1.5;color:var(--muted)}
   @media (max-width:380px){.metrics{grid-template-columns:repeat(2,1fr)}}
 </style>
@@ -47,38 +49,61 @@
   <div class="metrics" id="metrics"></div>
   <div class="wait" id="wait">ИИ дописывает подробный портрет<span id="dots"></span></div>
   <div id="sections"></div>
-  <p class="src" id="src">Портрет составлен по замерам вашей подписи: наклону, нажиму, размаху, высоте и связности букв. Саму подпись мы не сохраняем. Это развлечение, а не психологический тест.</p>
+  <p class="src" id="src">Портрет составлен нейросетью по замерам вашей подписи: наклону, размаху, высоте, связности, темпу, а нажим и угол пера — только если их отдал датчик стилуса. Подпись нейросеть видела один раз и не сохраняла; текст портрета хранится 30 дней. Это развлечение, а не психологический тест.</p>
 </main>
 <script src="config.js"></script>
 <script src="app.js"></script>
 <script>
   const A = window.AutographApp, q = new URLSearchParams(location.search), cfg = window.AG_CONFIG || {};
-  const num = (k, d) => { const v = parseFloat(q.get(k)); return Number.isFinite(v) ? v : d; };
-  const f = { slant: num('s', 0), press: num('p', .5), span: num('w', 3), mm: num('h', 11), connect: num('c', 75), rise: num('r', 0), strokes: num('n', 1) };
-  const thName = A.THEMES[q.get('e')] ? q.get('e') : 'vrg', th = A.THEMES[thName];
-  for (const k of ['bg', 'bg2', 'text', 'muted', 'accent', 'seal']) document.documentElement.style.setProperty('--' + k, th[k]);
-  document.getElementById('mk').innerHTML = A.MARKS[th.mark]; document.getElementById('bn').innerHTML = th.brand; document.getElementById('ev').textContent = th.event;
+  const $ = id => document.getElementById(id);
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const local = A.portrait(f), title = (q.get('t') || local.title).slice(0, 40);
-  const setTitle = t => { document.getElementById('title').innerHTML = esc(t).replace(/ (\S+)$/, ' <em>$1</em>'); document.title = t + ' — портрет по подписи'; };
-  setTitle(title);
-  document.getElementById('metrics').innerHTML = A.rows(f).map(r => `<div class="m"><div class="lbl dim">${r[0]}</div><div class="v">${r[1]}</div><div class="d">${r[2]}</div></div>`).join('');
-  const draw = (intro, secs) => {
-    document.getElementById('intro').textContent = intro;
-    document.getElementById('sections').innerHTML = secs.map((s, i) => `<section><h2><i>${String(i + 1).padStart(2, '0')}</i>${esc(s.h)}</h2><p>${esc(s.text)}</p></section>`).join('');
-    document.getElementById('wait').remove(); clearInterval(dt);
+  const applyTheme = name => {
+    const th = A.THEMES[name] || A.THEMES.vrg;
+    for (const k of ['bg', 'bg2', 'text', 'muted', 'accent', 'seal']) document.documentElement.style.setProperty('--' + k, th[k]);
+    $('mk').innerHTML = A.MARKS[th.mark]; $('bn').innerHTML = th.brand; $('ev').textContent = th.event; return th;
   };
-  const fallback = () => draw(local.text.split('. ').slice(0, 1).join('. ') + '.', [
-    { h: 'Характер', text: local.text },
-    ...local.facets.map(([h, t]) => ({ h, text: t })),
-    { h: 'Ваши суперсилы', text: local.traits.map(([n, v]) => `${n} — ${v} %`).join(' · ') },
-  ]);
-  let d = 0; const dt = setInterval(() => { document.getElementById('dots').textContent = '.'.repeat(d++ % 4); }, 400);
-  if (!cfg.api) fallback();
-  else fetch(cfg.api, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'full', f, event: th.event, title }) })
-    .then(r => r.ok ? r.json() : null)
-    .then(o => { if (!o || !Array.isArray(o.sections)) return fallback(); if (o.title && !q.get('t')) setTitle(o.title); draw(o.intro || '', o.sections); })
-    .catch(fallback);
+  const setTitle = t => { $('title').innerHTML = esc(t).replace(/ (\S+)$/, ' <em>$1</em>'); document.title = t + ' — портрет по подписи'; };
+  const metrics = f => { $('metrics').innerHTML = A.rows(f).map(r => `<div class="m${r[1] === '—' ? ' off' : ''}"><div class="lbl dim">${r[0]}</div><div class="v">${r[1]}</div><div class="d">${r[2]}</div></div>`).join(''); };
+  let d = 0; const dt = setInterval(() => { const e = $('dots'); if (e) e.textContent = '.'.repeat(d++ % 4); }, 400);
+  const draw = (intro, secs) => {
+    $('intro').textContent = intro;
+    $('sections').innerHTML = secs.map((s, i) => `<section><h2><i>${String(i + 1).padStart(2, '0')}</i>${esc(s.h)}</h2><p>${esc(s.text)}</p></section>`).join('');
+    const w = $('wait'); if (w) w.remove(); clearInterval(dt);
+  };
+  const fallback = f => {
+    const local = A.portrait(f);
+    draw(local.text.split('. ')[0] + '.', [{ h: 'Характер', text: local.text }, ...local.facets.map(([h, t]) => ({ h, text: t })),
+      { h: 'Ваши сильные стороны', text: local.traits.map(([n, v]) => `${n} — ${v} %`).join(' · ') }]);
+  };
+  const fail = msg => { const w = $('wait'); if (w) { w.textContent = msg; w.classList.add('err'); } clearInterval(dt); };
+
+  const id = q.get('id');
+  applyTheme(q.get('e'));
+  if (id && cfg.api) {
+    // разбор считается на облаке ещё пока гость у стойки — здесь только забираем его по номеру
+    setTitle('Ваш портрет'); const t0 = Date.now(); let shown = false;
+    const poll = async () => {
+      let r = null, o = null;
+      try { r = await fetch(`${cfg.api}?id=${encodeURIComponent(id)}`, { cache: 'no-store' }); o = await r.json(); } catch (e) {}
+      const waited = (Date.now() - t0) / 1000;
+      if (o && o.f) {
+        if (o.theme) applyTheme(o.theme);
+        if (!shown) { metrics(o.f); shown = true; }
+        const title = o.title || (o.full && o.full.title); if (title) setTitle(title);
+        if (o.status === 'ready' && o.full) return draw(o.full.intro || '', o.full.sections || []);
+        if (o.status === 'failed' || waited > 75) return fallback(o.f);
+      } else if (r && r.status === 404 && waited > 12) return fail('Портрет не найден. Ссылка хранится 30 дней — возможно, она устарела.');
+      else if (waited > 75) return fail('Не удалось загрузить портрет. Проверьте интернет и обновите страницу.');
+      setTimeout(poll, 1500);
+    };
+    poll();
+  } else {
+    // старый вид ссылки: замеры прямо в адресе (без облака)
+    const num = (k, dv) => { const v = parseFloat(q.get(k)); return Number.isFinite(v) ? v : dv; };
+    const f = { slant: num('s', 0), span: num('w', 3), mm: num('h', 30), connect: num('c', 75), rise: num('r', 0), strokes: num('n', 1), round: 2,
+      hasPressure: q.has('p'), press: q.has('p') ? num('p', .5) : null, pressSd: .1, speed: q.has('v') ? num('v', 0) : null, hasTilt: false };
+    setTitle((q.get('t') || A.portrait(f).title).slice(0, 44)); metrics(f); fallback(f);
+  }
 </script>
 </body>
 </html>
