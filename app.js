@@ -87,8 +87,8 @@ function synthStroke(d, dur, seed) {
 }
 
 // ───────── признаки почерка из точек ─────────
-// Честный разбор: всё считается по реальным точкам. Нажим и угол пера — только с датчиков стилуса;
-// если датчика нет, признак помечается «нет данных» и в выводы не идёт.
+// Честный разбор: всё считается по реальным точкам. Нажим не оценивается вовсе (датчик влияет только на толщину линии);
+// угол пера — только с датчика стилуса, без датчика в выводы не идёт.
 // mmPerUnit — сколько миллиметров экрана в одной единице холста (по умолчанию для планшета ~10,9″).
 function analyse(strokes, mmPerUnit = 0.175) {
   const all = strokes.flat();
@@ -121,7 +121,7 @@ function analyse(strokes, mmPerUnit = 0.175) {
   const prs = all.map(p => p.pr).filter(v => typeof v === 'number');
   const pm = prs.length ? prs.reduce((a, b) => a + b, 0) / prs.length : 0;
   const psd = prs.length ? Math.sqrt(prs.reduce((a, b) => a + (b - pm) * (b - pm), 0) / prs.length) : 0;
-  const hasPressure = prs.length > all.length * 0.7 && psd > 0.012 && pm > 0.02;
+  const hasPressure = false;   // нажим не оценивается: датчик стилуса влияет только на толщину линии
   // угол пера к экрану — только если стилус его отдаёт
   const tilts = all.map(p => p.tilt).filter(v => typeof v === 'number');
   const hasTilt = tilts.length > all.length * 0.7 && Math.max(...tilts) - Math.min(...tilts) > 0.5;
@@ -148,9 +148,6 @@ function rows(f) {
   const sg = v => (v > 0.5 ? '+' : v < -0.5 ? '−' : '') + Math.abs(Math.round(v));
   const r = [
     ['Наклон', sg(f.slant) + '°', f.slant > 6 ? 'вправо — открытость' : f.slant < -6 ? 'влево — сдержанность' : 'прямой — баланс', clamp(0.5 + f.slant / 50, .08, 1), 'slant'],
-    f.hasPressure
-      ? ['Нажим', Math.round(f.press * 100) + NB + '%', (f.press > 0.55 ? 'сильный' : f.press < 0.32 ? 'лёгкий' : 'средний') + (f.pressSd < 0.1 ? ' и ровный' : ' и живой'), f.press, 'press']
-      : ['Нажим', '—', 'нет датчика нажима', 0, 'press'],
     ['Размах', '×' + f.span.toFixed(1).replace('.', ','), f.span > 3.2 ? 'широкий — масштаб' : f.span < 2 ? 'компактный — фокус' : 'средний — гибкость', clamp(f.span / 5, .1, 1), 'span'],
     ['Высота подписи', f.mm + NB + 'мм', f.mm >= 45 ? 'крупная — на виду' : f.mm <= 22 ? 'компактная — к деталям' : 'средняя — открытость', clamp(f.mm / 70, .1, 1), 'mm'],
     ['Связность', f.connect + NB + '%', f.connect > 80 ? 'слитная — логика' : f.connect < 60 ? 'раздельная — интуиция' : 'смешанная — гибкость', f.connect / 100, 'connect'],
@@ -290,7 +287,7 @@ class AutographApp {
         <div class="k abs lbl dim">Шаг 2 из 3</div>
         <div class="ag-rows"></div>
         <div class="ag-status"><div class="t"></div><div class="bar"><i></i></div><div class="pc"></div></div>
-        <div class="ag-graph"><div class="lbl dim">Нажим по ходу росчерка</div><canvas></canvas></div>
+        <div class="ag-graph"><div class="lbl dim">Скорость пера по ходу росчерка</div><canvas></canvas></div>
       </section>
       <section class="ag-scr ag-res">
         <div class="k abs lbl">Портрет личности · ИИ</div>
@@ -518,7 +515,7 @@ class AutographApp {
     this.el.rows.classList.toggle('compact', rs.length > 6);
     this.el.rows.innerHTML = rs.map(r => `<div class="ag-row${r[1] === '—' ? ' off' : ''}"><span class="n">${r[0].toUpperCase()}</span><span class="v">${r[1]}</span><span class="d">${r[2]}</span><span class="tr"><i class="fi"></i></span></div>`).join('');
     const rowEls = [...this.el.rows.children];
-    const ST = ['Сканируем подпись…', 'Измеряем наклон букв…', f.hasPressure ? 'Читаем датчик нажима…' : 'Датчика нажима нет — пропускаем…', 'Считаем размах и высоту…', f.speed ? 'Засекаем темп росчерка…' : 'Смотрим, как связаны буквы…', 'Пишем портрет личности…'];
+    const ST = ['Сканируем подпись…', 'Измеряем наклон букв…', 'Смотрим на петли и завитки…', 'Считаем размах и высоту…', f.speed ? 'Засекаем темп росчерка…' : 'Смотрим, как связаны буквы…', 'Пишем портрет личности…'];
     const step = 0.78 / rs.length;
     await Promise.all([this.fade('sign', 0, 450), this.moveCard({ x: 48, y: 176, s: 0.74 }, 900)]);
     this.fade('an', 1, 500);
@@ -623,7 +620,7 @@ class AutographApp {
         const sm = v.map((_, i) => { let s = 0, k = 0; for (let j = Math.max(0, i - 4); j <= Math.min(v.length - 1, i + 4); j++) { s += v[j]; k++; } return s / k; });
         const mx = Math.max(...sm) || 1; this.gv = sm.map(x => x / mx);
       }
-      this.el.graphLbl.textContent = this.f.hasPressure ? 'Нажим по ходу росчерка · датчик стилуса' : 'Скорость пера по ходу росчерка · датчика нажима нет';
+      this.el.graphLbl.textContent = 'Скорость пера по ходу росчерка';
     }
     const V = this.gv;
     const upto = Math.floor(n * E.inOut(seg(a, 0.05, 0.9)));
